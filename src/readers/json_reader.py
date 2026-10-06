@@ -4,7 +4,7 @@ from typing import Any
 
 
 class JsonReaderError(Exception):
-    """Base exception for JSON reader failures."""
+    """Base exception for JSON readers failures."""
 
 
 class JsonFileNotFoundError(JsonReaderError):

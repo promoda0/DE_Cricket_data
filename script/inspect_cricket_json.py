@@ -1,247 +1,93 @@
-import json
+from __future__ import annotations
+
+import argparse
 import logging
 import sys
 from pathlib import Path
 
-
-# ============================================================
-# Configuration
-# ============================================================
-
-SOURCE_DIR = Path(r"G:\My Drive\Cricket\ipl")
-
-LOG_FORMAT = (
-    "%(asctime)s | %(levelname)s | "
-    "%(name)s | %(message)s"
+from src.ingestion.bronze_ingestion import (
+    BronzeIngestionError,
+    ingest_json_to_bronze,
 )
-
-logging.basicConfig(
-    level=logging.INFO,
-    format=LOG_FORMAT,
-)
-
-logger = logging.getLogger("cricket_json_inspector")
+from src.logging.logger_config import configure_logging
 
 
-# ============================================================
-# JSON Structure Inspection
-# ============================================================
-
-def inspect_structure(data, level=0, max_level=3):
-    """
-    Recursively inspect the JSON structure without dumping
-    the complete dataset.
-    """
-
-    indent = "  " * level
-
-    if level > max_level:
-        logger.info("%s...", indent)
-        return
-
-    if isinstance(data, dict):
-
-        for key, value in data.items():
-
-            logger.info(
-                "%s%s -> %s",
-                indent,
-                key,
-                type(value).__name__,
-            )
-
-            if isinstance(value, (dict, list)):
-                inspect_structure(
-                    value,
-                    level + 1,
-                    max_level,
-                )
-
-    elif isinstance(data, list):
-
-        logger.info(
-            "%sList size -> %d",
-            indent,
-            len(data),
-        )
-
-        if data:
-            logger.info(
-                "%sInspecting first element:",
-                indent,
-            )
-
-            inspect_structure(
-                data[0],
-                level + 1,
-                max_level,
-            )
+logger = logging.getLogger(__name__)
 
 
-# ============================================================
-# JSON Reader
-# ============================================================
+def parse_arguments() -> argparse.Namespace:
+    """Parse command-line arguments."""
 
-def read_json_file(file_path: Path) -> dict:
-
-    logger.info(
-        "Reading JSON file: %s",
-        file_path,
+    parser = argparse.ArgumentParser(
+        description="Ingest a Cricsheet JSON file into Bronze."
     )
 
-    try:
-
-        with file_path.open(
-            "r",
-            encoding="utf-8",
-        ) as file:
-
-            data = json.load(file)
-
-        logger.info(
-            "JSON file successfully loaded: %s",
-            file_path.name,
-        )
-
-        return data
-
-    except json.JSONDecodeError as exc:
-
-        logger.error(
-            "Invalid JSON format in file '%s': %s",
-            file_path.name,
-            exc,
-        )
-
-        raise
-
-    except OSError as exc:
-
-        logger.error(
-            "Failed to read file '%s': %s",
-            file_path,
-            exc,
-        )
-
-        raise
-
-
-# ============================================================
-# Source File Discovery
-# ============================================================
-
-def get_source_file(source_dir: Path) -> Path:
-
-    logger.info(
-        "Scanning source directory: %s",
-        source_dir,
+    parser.add_argument(
+        "--source",
+        required=True,
+        type=Path,
+        help="Path to the source Cricsheet JSON file.",
     )
 
-    if not source_dir.exists():
-
-        raise FileNotFoundError(
-            f"Source directory does not exist: {source_dir}"
-        )
-
-    json_files = sorted(
-        source_dir.glob("*.json")
+    parser.add_argument(
+        "--bronze-dir",
+        required=True,
+        type=Path,
+        help="Destination directory for Bronze data.",
     )
 
-    if not json_files:
-
-        raise FileNotFoundError(
-            f"No JSON files found in: {source_dir}"
-        )
-
-    logger.info(
-        "JSON files discovered: %d",
-        len(json_files),
+    parser.add_argument(
+        "--log-file",
+        type=Path,
+        default=Path("logs/bronze_ingestion.log"),
+        help="Path to the ingestion log file.",
     )
 
-    # For inspection, select the first file.
-    selected_file = json_files[0]
+    return parser.parse_args()
 
-    logger.info(
-        "Selected file for inspection: %s",
-        selected_file.name,
-    )
-
-    return selected_file
-
-
-# ============================================================
-# Main
-# ============================================================
 
 def main() -> int:
+    """Run the Bronze ingestion process."""
 
-    logger.info(
-        "Starting cricket JSON inspection"
+    args = parse_arguments()
+
+    configure_logging(
+        log_file=args.log_file,
     )
 
+    logger.info("Bronze ingestion started")
+    logger.info("Source file: %s", args.source)
+    logger.info("Bronze directory: %s", args.bronze_dir)
+
     try:
-
-        # 1. Discover source file
-        json_file = get_source_file(
-            SOURCE_DIR
+        destination_file = ingest_json_to_bronze(
+            source_file=args.source,
+            bronze_dir=args.bronze_dir,
         )
-
-        # 2. Read JSON
-        data = read_json_file(
-            json_file
-        )
-
-        # 3. Root information
-        logger.info(
-            "Root data type: %s",
-            type(data).__name__,
-        )
-
-        if isinstance(data, dict):
-
-            logger.info(
-                "Root-level keys: %d",
-                len(data),
-            )
-
-            logger.info(
-                "Root-level fields: %s",
-                list(data.keys()),
-            )
-
-        elif isinstance(data, list):
-
-            logger.info(
-                "Root-level record count: %d",
-                len(data),
-            )
-
-        # 4. Inspect nested structure
-        logger.info(
-            "Inspecting nested JSON structure"
-        )
-
-        inspect_structure(data)
 
         logger.info(
-            "Cricket JSON inspection completed successfully"
+            "Bronze ingestion completed successfully"
+        )
+
+        logger.info(
+            "Bronze file created: %s",
+            destination_file,
         )
 
         return 0
 
-    except Exception:
-
+    except BronzeIngestionError:
         logger.exception(
-            "Cricket JSON inspection failed"
+            "Bronze ingestion failed"
         )
+        return 1
 
+    except Exception:
+        logger.exception(
+            "Unexpected error during Bronze ingestion"
+        )
         return 1
 
 
-# ============================================================
-# Entry Point
-# ============================================================
-
 if __name__ == "__main__":
-
     sys.exit(main())
